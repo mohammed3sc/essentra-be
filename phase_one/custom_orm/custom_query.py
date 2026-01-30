@@ -192,6 +192,15 @@ class CustomQuery:
         CustomQuery.execute_query(query, [record_data['field1'], record_data['field2']])
 
 
+    @staticmethod
+    def get_data_type(schema=settings.SCHEMA_NAME, table_name=None):
+        if not table_name:
+            raise ValueError("Table name must be provided.")
+        query = f"SELECT COLUMN_NAME, DATA_TYPE, LENGTH, NUMERIC_SCALE FROM QSYS2.SYSCOLUMNS WHERE TABLE_SCHEMA = '{schema}' AND TABLE_NAME = '{table_name}'"
+        dtypes = CustomQuery.execute_query(query)
+        dtypedf = pd.DataFrame.from_records(dtypes, columns=['column', 'dtype', 'precision', 'scale'])
+        return dtypedf
+
 # ====================using pandas ==================
 
 import pandas as pd 
@@ -338,6 +347,53 @@ class PandsCustomQuery:
 
 
     @staticmethod
+    def bom_list(schema_name=settings.SCHEMA_NAME, table_name=None,where_clause="", offset=None, limit=None):
+        """
+        This is a custom made function to get the BOMList
+        where it has to remove the duplicate entries of BPROD-BCHLD
+        """
+        columns = CustomQuery.get_column_names(schema_name=schema_name, table_name=table_name)
+        
+        # Join columns into a string for the query
+        columns_str = ", ".join(columns)
+        
+        # Step1: CTE for aggregation, to remove duplicates from BOM based on BPROD, BCHLD, LIDSC1 & take the MAX(BQREQ) - fix Mohammed 30-Jan-2026
+        cte_clause = f"""
+            WITH bom_agg AS (
+                SELECT
+                    BPROD,
+                    BCHLD,
+                    LIDSC1,
+                    MAX(BQREQ) AS BQREQ
+                FROM {schema_name}.{table_name}
+                {where_clause}
+                GROUP BY
+                    BPROD, BCHLD, LIDSC1
+            )
+        """
+        
+        # Construct the SQL query with OFFSET and LIMIT for pagination
+        if offset is not None and limit is not None:
+            pagination_clause = f"""
+            {cte_clause}
+            SELECT {columns_str} FROM (
+                SELECT {columns_str}, ROW_NUMBER() OVER(ORDER BY BPROD, BCHLD, LIDSC1) AS row_num
+                FROM bom_agg
+            ) AS subquery
+            WHERE row_num > {offset} AND row_num <= {offset + limit}
+            """
+        else:
+            pagination_clause = f"""
+            {cte_clause}
+            SELECT {columns_str} FROM (
+                SELECT {columns_str}, ROW_NUMBER() OVER(ORDER BY BPROD, BCHLD, LIDSC1) AS row_num
+                FROM bom_agg
+            ) AS subquery
+            """
+
+        return CustomQuery.execute_query(pagination_clause)
+
+    @staticmethod
     def bom_stock_pivot(schema_name=settings.SCHEMA_NAME, table_name=None, bom_table_name='BOM_TABLE'):
         # Fetch unique warehouse names
         warehouses_df = PandsCustomQuery.distinct(table_name=table_name, column_list=["LWHS"])
@@ -353,8 +409,24 @@ class PandsCustomQuery:
         bom_columns_df = CustomQuery.get_column_names(table_name=bom_table_name)
         bom_columns_str = ', '.join(f"b.{col}" for col in bom_columns_df)
 
+        # Fix Mohammed 28-Jan-2026, to consolidate duplicate rows with same item# & item_child#
+        # And Fix for Topic3 where the summation to be done basedon BCHLD and not BPROD
+        # And fix instead of doing SUM(BQREQ) we are taking only single row i.e eliminating duplicates
+        
         # Construct the SQL query with a JOIN to the BOM table
         query_pivot = f"""
+            WITH bom_agg AS (
+                SELECT
+                    BPROD,
+                    BCHLD,
+                    LIDSC1,
+                    MAX(BQREQ) AS BQREQ
+                FROM
+                    {schema_name}.{bom_table_name}
+                GROUP BY
+                    BPROD, BCHLD, LIDSC1
+            )
+            
             SELECT 
                 {bom_columns_str},
                 {case_statements},
@@ -362,9 +434,9 @@ class PandsCustomQuery:
             FROM 
                 {schema_name}.{table_name} t
             LEFT JOIN 
-                {schema_name}.{bom_table_name} b 
+                bom_agg b 
             ON 
-                t.LPROD = b.BPROD
+                t.LPROD = b.BCHLD
             GROUP BY 
                 {bom_columns_str}
 
@@ -434,8 +506,6 @@ class PandsCustomQuery:
         # print(count_query,"---------------------")
         result = CustomQuery.execute_query(count_query)
         return result[0][0] if result else 0
-
-
 
 
 
