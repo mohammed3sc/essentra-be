@@ -358,7 +358,14 @@ class BomList(View):
             where_clause = build_where_clause(filters)
             
           # Fetch data with filters and pagination directly from the database
-            data = CustomQuery.all_table_data(
+            # data = CustomQuery.all_table_data(
+                # table_name=self.table_name,
+                # where_clause=where_clause,
+                # offset=offset,
+                # limit=page_size
+            # )
+            
+            data = PandsCustomQuery.bom_list(
                 table_name=self.table_name,
                 where_clause=where_clause,
                 offset=offset,
@@ -369,6 +376,8 @@ class BomList(View):
                 dict(list({bom_eng.get(key, key):transform_value(value) for key, value in zip(table_columns, item)}.items()))
                 for item in data
             ]
+            
+            
             if export_table and export_table=="bom":
                 return generate_excel(result_list,table_name=export_table)
             else:
@@ -1029,11 +1038,14 @@ class FinalList(View):
             
             # Adding fix for subtracting LQALL from grand_total before computation - 29-Dec-2025 - Mohammed Magar
             open_order_data_df = pd.DataFrame.from_records(open_order_data, columns=['mesan_item', 'date', 'TOTLINEVAL', 'BALANCE', 'LQALL'])
-            result_df = result_df.merge(open_order_data_df[['mesan_item','LQALL']].set_index('mesan_item'), left_on='item_number', right_index=True, how='left')
             
-                #subtracting LQALL from grand_total
+            # fix here to sum LQALL if there are multiple entries of orders
+            open_order_data_df = open_order_data_df.groupby(['mesan_item'], as_index=False).agg({'LQALL': 'sum'})
+            result_df = result_df.merge(open_order_data_df.set_index('mesan_item'), left_on='item_number', right_index=True, how='left')
+            
+            #subtracting LQALL from grand_total
             result_df['grand_total'] = result_df['grand_total'] - result_df['LQALL'].astype(float)
-            
+
             
             # End of fix
 
@@ -1149,6 +1161,11 @@ class FinalList(View):
             df2_subset = pivot_table[final_list] 
             final_df = pd.merge(combined_df, df2_subset, on='item_number_child', how='left')
             final_df=final_df.round(3)
+            final_df.drop(columns='LQALL', inplace=True)
+            
+            # Fix for Topic3 Mohammed 29-Jan-2026
+            # Show only entries where grand_total > 0
+            final_df = final_df.loc[final_df.grand_total>0]
             
             filter_columns={col: list(set(final_df[col])) for col in final_df.columns}
 
@@ -1169,7 +1186,7 @@ class FinalList(View):
             page_number = int(request.GET.get('p', 1))
             page_size = int(request.GET.get('row_size', 10))
             offset = (page_number - 1) * page_size
-            total_count=len(pivot_table)
+            total_count=len(combined_json)
             total_pages = (total_count + page_size - 1) // page_size  # Calculate total pages
             
             # Build pagination URLs
