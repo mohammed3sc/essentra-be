@@ -151,7 +151,7 @@ class OpenOrdersList(View):
                     # list({
                     #     "week_no": 
                     #     ("Backlog" if datetime.datetime.strptime(str(transform_value(item[open_order_keys.index('CHKLRDTE')])), '%d-%m-%Y').date() < datetime.date.today() else 
-                    #     datetime.datetime.strptime(str(transform_value(item[open_order_keys.index('CHKLRDTE')])), '%d-%m-%Y').date().isocalendar().week)
+                    #     datetime.datetime.strptime(str(transform_value(item[open_order_keys.index('CHKLRDTE')])), '%d-%m-%Y').date().isocalendar()[1])
                     # }.items()) +
                     list({
                         "week_no": 
@@ -358,14 +358,7 @@ class BomList(View):
             where_clause = build_where_clause(filters)
             
           # Fetch data with filters and pagination directly from the database
-            # data = CustomQuery.all_table_data(
-                # table_name=self.table_name,
-                # where_clause=where_clause,
-                # offset=offset,
-                # limit=page_size
-            # )
-            
-            data = PandsCustomQuery.bom_list(
+            data = CustomQuery.all_table_data(
                 table_name=self.table_name,
                 where_clause=where_clause,
                 offset=offset,
@@ -376,8 +369,6 @@ class BomList(View):
                 dict(list({bom_eng.get(key, key):transform_value(value) for key, value in zip(table_columns, item)}.items()))
                 for item in data
             ]
-            
-            
             if export_table and export_table=="bom":
                 return generate_excel(result_list,table_name=export_table)
             else:
@@ -461,7 +452,7 @@ class BomOrderBookList(View):
             for item in open_order_data:
                 mesan_item = item[self.columns.index('LPROD')]
                 chk_lr_dte = datetime.datetime.strptime(str(transform_value(item[self.columns.index('CHKLRDTE')])), '%d-%m-%Y').date()
-                week_no = ("Backlog" if chk_lr_dte < datetime.date.today() else f"Week{chk_lr_dte.isocalendar().week}")
+                week_no = ("Backlog" if chk_lr_dte < datetime.date.today() else f"Week{chk_lr_dte.isocalendar()[1]}")
                 week_no = str(week_no)
                 total_order_line_value = float(item[self.columns.index('BALANCE')])
 
@@ -612,7 +603,7 @@ class BomOrderBookPivot(View):
             for item in open_order_data:
                 mesan_item = item[self.columns.index('LPROD')]
                 chk_lr_dte = datetime.datetime.strptime(str(transform_value(item[self.columns.index('CHKLRDTE')])), '%d-%m-%Y').date()
-                week_no = ("Backlog" if chk_lr_dte < datetime.date.today() else f"Week{chk_lr_dte.isocalendar().week}")
+                week_no = ("Backlog" if chk_lr_dte < datetime.date.today() else f"Week{chk_lr_dte.isocalendar()[1]}")
                 week_no = str(week_no)
                 total_order_line_value = float(item[self.columns.index('TOTLINEVAL')])
 
@@ -796,7 +787,7 @@ class BomorderbookTabloList(View):
             for item in open_order_data:
                 mesan_item = item[self.columns.index('LPROD')]
                 chk_lr_dte = datetime.datetime.strptime(str(transform_value(item[self.columns.index('CHKLRDTE')])), '%d-%m-%Y').date()
-                week_no = ("Backlog" if chk_lr_dte < datetime.date.today() else f"Week{chk_lr_dte.isocalendar().week}")
+                week_no = ("Backlog" if chk_lr_dte < datetime.date.today() else f"Week{chk_lr_dte.isocalendar()[1]}")
                 week_no = str(week_no)
                 total_order_line_value = float(item[self.columns.index('BALANCE')])
 
@@ -969,7 +960,7 @@ class FinalList(View):
     bom_table="E3SCBOM"
     open_order_table="E3SCORDERS"
     stock_table="E3SCSTOCK"
-    columns = ["LPROD", "CHKLRDTE", "TOTLINEVAL","BALANCE","LQALL"]
+    columns = ["LPROD", "CHKLRDTE", "TOTLINEVAL","BALANCE"]
 
     def post(self, request):
         try:
@@ -1011,7 +1002,7 @@ class FinalList(View):
             for item in open_order_data:
                 mesan_item = item[self.columns.index('LPROD')]
                 chk_lr_dte = datetime.datetime.strptime(str(transform_value(item[self.columns.index('CHKLRDTE')])), '%d-%m-%Y').date()
-                week_no = ("Backlog" if chk_lr_dte < datetime.date.today() else f"Week{chk_lr_dte.isocalendar().week}")
+                week_no = ("Backlog" if chk_lr_dte < datetime.date.today() else f"Week{chk_lr_dte.isocalendar()[1]}")
                 week_no = str(week_no)
                 total_order_line_value = float(item[self.columns.index('BALANCE')])
 
@@ -1035,21 +1026,8 @@ class FinalList(View):
 
             # Convert result_list to DataFrame
             result_df = pd.DataFrame(result_list)
-            
-            # Adding fix for subtracting LQALL from grand_total before computation - 29-Dec-2025 - Mohammed Magar
-            open_order_data_df = pd.DataFrame.from_records(open_order_data, columns=['mesan_item', 'date', 'TOTLINEVAL', 'BALANCE', 'LQALL'])
-            
-            # fix here to sum LQALL if there are multiple entries of orders
-            open_order_data_df = open_order_data_df.groupby(['mesan_item'], as_index=False).agg({'LQALL': 'sum'})
-            result_df = result_df.merge(open_order_data_df.set_index('mesan_item'), left_on='item_number', right_index=True, how='left')
-            
-            #subtracting LQALL from grand_total
-            result_df['grand_total'] = result_df['grand_total'] - result_df['LQALL'].astype(float)
 
-            
-            # End of fix
-
-            # # Ensure 'item_number' is in string format for consistency`
+            # # Ensure 'item_number' is in string format for consistency
             # result_df.index = result_df.index.astype(str)
 
             stock_pvt = PandsCustomQuery.stock_pivot(table_name=self.stock_table)[["LPROD", "GTOTAL"]]
@@ -1092,9 +1070,7 @@ class FinalList(View):
                     remaining_columns.append(col)
             week_columns = sorted(weeks, key=order_weeks)
             
-            # fix subtract LQALL from week columns
-            combined_df[week_columns] = combined_df[week_columns].sub(combined_df['LQALL'].astype(float), axis=0)
-            
+
             # Create the final column order
             combined_df[week_columns] = combined_df[week_columns].mul(combined_df['bom_quantity_required'], axis=0)*1000
 
@@ -1115,13 +1091,8 @@ class FinalList(View):
             # Check the dtype to confirm it's correct
             # print(combined_df['item_number_child'].dtype)
             
-            # fix here 29-Dec-2025
-            # combined_df['net_required']=(combined_df['openorder_grandtotal'] - combined_df['STOCKGRANDTOTAL'])*2
-            combined_df['net_required']=combined_df['openorder_grandtotal'] - combined_df['CHILDSTOCKGRANDTOTAL']
-            
-            # fix here 29-Dec-2025
-            #combined_df['net_required_after_deduction']=combined_df['net_required']-combined_df['CHILDSTOCKGRANDTOTAL']
-            combined_df['net_required_after_deduction']=combined_df['net_required']-(combined_df['STOCKGRANDTOTAL'] * combined_df['bom_quantity_required'])
+            combined_df['net_required']=(combined_df['openorder_grandtotal'] - combined_df['STOCKGRANDTOTAL'])*2
+            combined_df['net_required_after_deduction']=combined_df['net_required']-combined_df['CHILDSTOCKGRANDTOTAL']
 
             # Ensure item_number_child is not in pivote_columns if it's already in index
             pivote_columns = [col for col in week_columns + ['openorder_grandtotal'] + remaining_columns + ['STOCKGRANDTOTAL','CHILDSTOCKGRANDTOTAL','net_required','net_required_after_deduction'] if col != 'item_number_child']
@@ -1161,11 +1132,8 @@ class FinalList(View):
             df2_subset = pivot_table[final_list] 
             final_df = pd.merge(combined_df, df2_subset, on='item_number_child', how='left')
             final_df=final_df.round(3)
-            final_df.drop(columns='LQALL', inplace=True)
+
             
-            # Fix for Topic3 Mohammed 29-Jan-2026
-            # Show only entries where grand_total > 0
-            final_df = final_df.loc[final_df.grand_total>0]
             
             filter_columns={col: list(set(final_df[col])) for col in final_df.columns}
 
@@ -1176,17 +1144,20 @@ class FinalList(View):
                     final_df = final_df[final_df[column].isin(values)]
             
             
+            
             # Remove duplicates based on item_no and item_child
             # final_df = final_df.drop_duplicates(subset=['item_number', 'item_number_child'], keep='first')
             # # Convert combined dataframe to JSON
             combined_json = final_df.to_dict(orient='records')
+
+
             
             
             # Pagination logic
             page_number = int(request.GET.get('p', 1))
             page_size = int(request.GET.get('row_size', 10))
             offset = (page_number - 1) * page_size
-            total_count=len(combined_json)
+            total_count=len(pivot_table)
             total_pages = (total_count + page_size - 1) // page_size  # Calculate total pages
             
             # Build pagination URLs
@@ -1611,7 +1582,7 @@ class OrderBookPivot(View):
             for item in data:
                 mesan_item = item[self.columns.index('LPROD')]  
                 chk_lr_dte = datetime.datetime.strptime(str(transform_value(item[self.columns.index('CHKLRDTE')])), '%d-%m-%Y').date()
-                week_no = ("Backlog" if chk_lr_dte < datetime.date.today() else chk_lr_dte.isocalendar().week)
+                week_no = ("Backlog" if chk_lr_dte < datetime.date.today() else chk_lr_dte.isocalendar()[1])
                 week_no = str(week_no)
                 total_order_line_value = float(item[self.columns.index('BALANCE')])
                 
